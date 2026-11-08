@@ -1,0 +1,53 @@
+name: Build RinBridge APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Extract project ZIP
+        run: |
+          mkdir -p source
+          unzip -o *.zip -d source
+
+      - name: Find Android project
+        id: project
+        run: |
+          FILE=$(find source -name settings.gradle.kts -o -name settings.gradle | head -n 1)
+          if [ -z "$FILE" ]; then
+            echo "Gradle project not found"
+            exit 1
+          fi
+          echo "dir=$(dirname "$FILE")" >> $GITHUB_OUTPUT
+
+      - name: Build APK
+        run: |
+          cd "${{ steps.project.outputs.dir }}"
+          gradle assembleDebug --stacktrace
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: RinBridge-Debug-APK
+          path: source/**/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
