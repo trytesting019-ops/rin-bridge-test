@@ -33,4 +33,21 @@ jobs:
       - name: Find Android project
         id: project
         run: |
-          FILE=$(find source -name
+          FILE=$(find source -name settings.gradle.kts -o -name settings.gradle | head -n 1)
+          if [ -z "$FILE" ]; then
+            echo "Gradle project not found"
+            exit 1
+          fi
+          echo "dir=$(dirname "$FILE")" >> $GITHUB_OUTPUT
+
+      - name: Build APK
+        run: |
+          cd "${{ steps.project.outputs.dir }}"
+          gradle assembleDebug --stacktrace
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: RinBridge-Debug-APK
+          path: source/**/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
