@@ -9,16 +9,19 @@ import android.content.pm.PackageManager
 import android.Manifest
 import android.os.Build
 import android.view.Gravity
-import android.widget.Button
-import android.widget.LinearLayout
-import android.widget.TextView
-import android.widget.Toast
+import android.view.View
+import android.widget.*
+import android.animation.ObjectAnimator
+import android.animation.AnimatorSet
+import android.animation.ValueAnimator
+import android.view.animation.AccelerateDecelerateInterpolator
 
 class MainActivity : Activity() {
 
     private val microphoneRequestCode = 1001
-
     private lateinit var statusText: TextView
+    private lateinit var avatar: ImageView
+    private var avatarAnimation: AnimatorSet? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -26,26 +29,43 @@ class MainActivity : Activity() {
         val layout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
-            setPadding(40, 40, 40, 40)
+            setPadding(30, 30, 30, 30)
+            setBackgroundColor(android.graphics.Color.rgb(5, 12, 35))
         }
 
         val title = TextView(this).apply {
-            text = "RinBridge AI"
+            text = "RINBRIDGE AI"
             textSize = 28f
             gravity = Gravity.CENTER
+            setTextColor(android.graphics.Color.CYAN)
         }
 
         val description = TextView(this).apply {
-            text = "Your personal Android assistant"
-            textSize = 16f
+            text = "Your Personal Android Assistant"
+            textSize = 14f
             gravity = Gravity.CENTER
+            setTextColor(android.graphics.Color.WHITE)
         }
+
+        avatar = ImageView(this).apply {
+            setImageResource(R.drawable.rin_avatar)
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            contentDescription = "Rin AI Avatar"
+        }
+
+        layout.addView(
+            avatar,
+            LinearLayout.LayoutParams(280, 330).apply {
+                setMargins(0, 20, 0, 15)
+            }
+        )
 
         statusText = TextView(this).apply {
             text = "Status: Hey Rin OFF"
             textSize = 18f
             gravity = Gravity.CENTER
-            setPadding(0, 30, 0, 30)
+            setTextColor(android.graphics.Color.CYAN)
+            setPadding(0, 15, 0, 25)
         }
 
         val startButton = Button(this).apply {
@@ -93,6 +113,39 @@ class MainActivity : Activity() {
         setContentView(layout)
     }
 
+    private fun animateAvatar() {
+        avatarAnimation?.cancel()
+
+        val scaleX = ObjectAnimator.ofFloat(
+            avatar, View.SCALE_X, 1f, 1.04f
+        ).apply {
+            duration = 900
+            repeatCount = ValueAnimator.INFINITE
+            repeatMode = ValueAnimator.REVERSE
+        }
+
+        val scaleY = ObjectAnimator.ofFloat(
+            avatar, View.SCALE_Y, 1f, 1.04f
+        ).apply {
+            duration = 900
+            repeatCount = ValueAnimator.INFINITE
+            repeatMode = ValueAnimator.REVERSE
+        }
+
+        avatarAnimation = AnimatorSet().apply {
+            playTogether(scaleX, scaleY)
+            interpolator = AccelerateDecelerateInterpolator()
+            start()
+        }
+    }
+
+    private fun stopAvatarAnimation() {
+        avatarAnimation?.cancel()
+        avatarAnimation = null
+        avatar.scaleX = 1f
+        avatar.scaleY = 1f
+    }
+
     private fun startVoiceAssistant() {
 
         if (checkSelfPermission(
@@ -118,13 +171,8 @@ class MainActivity : Activity() {
                 startService(intent)
             }
 
-            statusText.text = "Status: Voice Service ON"
-
-            Toast.makeText(
-                this,
-                "Rin Voice Service started",
-                Toast.LENGTH_SHORT
-            ).show()
+            statusText.text = "Status: Hey Rin ON - Listening"
+            animateAvatar()
 
         } catch (e: Exception) {
             Toast.makeText(
@@ -145,12 +193,7 @@ class MainActivity : Activity() {
         stopService(intent)
 
         statusText.text = "Status: Hey Rin OFF"
-
-        Toast.makeText(
-            this,
-            "Rin Voice Service stopped",
-            Toast.LENGTH_SHORT
-        ).show()
+        stopAvatarAnimation()
     }
 
     @Deprecated("Deprecated in Android API")
@@ -160,13 +203,10 @@ class MainActivity : Activity() {
         grantResults: IntArray
     ) {
         super.onRequestPermissionsResult(
-            requestCode,
-            permissions,
-            grantResults
+            requestCode, permissions, grantResults
         )
 
         if (requestCode == microphoneRequestCode) {
-
             if (grantResults.isNotEmpty() &&
                 grantResults[0] == PackageManager.PERMISSION_GRANTED
             ) {
@@ -179,5 +219,10 @@ class MainActivity : Activity() {
                 ).show()
             }
         }
+    }
+
+    override fun onDestroy() {
+        stopAvatarAnimation()
+        super.onDestroy()
     }
 }
