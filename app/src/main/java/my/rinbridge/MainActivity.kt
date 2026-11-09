@@ -4,6 +4,9 @@ package my.rinbridge
 import android.app.Activity
 import android.os.Bundle
 import android.content.Intent
+import android.content.Context
+import android.content.BroadcastReceiver
+import android.content.IntentFilter
 import android.provider.Settings
 import android.content.pm.PackageManager
 import android.Manifest
@@ -19,9 +22,36 @@ import android.view.animation.AccelerateDecelerateInterpolator
 class MainActivity : Activity() {
 
     private val microphoneRequestCode = 1001
+
     private lateinit var statusText: TextView
     private lateinit var avatar: ImageView
+
     private var avatarAnimation: AnimatorSet? = null
+    private var receiverRegistered = false
+
+    private val statusReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+
+            if (intent?.action == VoiceForegroundService.ACTION_STATUS) {
+
+                val status = intent.getStringExtra(
+                    VoiceForegroundService.EXTRA_STATUS
+                ) ?: return
+
+                runOnUiThread {
+                    statusText.text = "Status: $status"
+
+                    if (status == "HEY RIN DETECTED") {
+                        Toast.makeText(
+                            this@MainActivity,
+                            "Rin dengar panggilan sayang!",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                }
+            }
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -30,7 +60,9 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
             setPadding(30, 30, 30, 30)
-            setBackgroundColor(android.graphics.Color.rgb(5, 12, 35))
+            setBackgroundColor(
+                android.graphics.Color.rgb(5, 12, 35)
+            )
         }
 
         val title = TextView(this).apply {
@@ -113,6 +145,38 @@ class MainActivity : Activity() {
         setContentView(layout)
     }
 
+    override fun onResume() {
+        super.onResume()
+
+        if (!receiverRegistered) {
+            val filter = IntentFilter(
+                VoiceForegroundService.ACTION_STATUS
+            )
+
+            if (Build.VERSION.SDK_INT >= 33) {
+                registerReceiver(
+                    statusReceiver,
+                    filter,
+                    Context.RECEIVER_NOT_EXPORTED
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                registerReceiver(statusReceiver, filter)
+            }
+
+            receiverRegistered = true
+        }
+    }
+
+    override fun onPause() {
+        if (receiverRegistered) {
+            unregisterReceiver(statusReceiver)
+            receiverRegistered = false
+        }
+
+        super.onPause()
+    }
+
     private fun animateAvatar() {
         avatarAnimation?.cancel()
 
@@ -171,7 +235,7 @@ class MainActivity : Activity() {
                 startService(intent)
             }
 
-            statusText.text = "Status: Hey Rin ON - Listening"
+            statusText.text = "Status: HEARING ON"
             animateAvatar()
 
         } catch (e: Exception) {
@@ -203,11 +267,14 @@ class MainActivity : Activity() {
         grantResults: IntArray
     ) {
         super.onRequestPermissionsResult(
-            requestCode, permissions, grantResults
+            requestCode,
+            permissions,
+            grantResults
         )
 
         if (requestCode == microphoneRequestCode) {
-            if (grantResults.isNotEmpty() &&
+            if (
+                grantResults.isNotEmpty() &&
                 grantResults[0] == PackageManager.PERMISSION_GRANTED
             ) {
                 startVoiceAssistant()
