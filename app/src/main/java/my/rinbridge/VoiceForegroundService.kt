@@ -77,7 +77,7 @@ class VoiceForegroundService : Service(), RecognitionListener {
                 )
                 putExtra(
                     RecognizerIntent.EXTRA_LANGUAGE,
-                    "ms-MY"
+                    "en-US"
                 )
                 putExtra(
                     RecognizerIntent.EXTRA_PARTIAL_RESULTS,
@@ -194,6 +194,7 @@ class VoiceForegroundService : Service(), RecognitionListener {
             SpeechRecognizer.ERROR_SERVER -> "RALAT SERVER"
             SpeechRecognizer.ERROR_SPEECH_TIMEOUT ->
                 "TIADA SUARA DITERIMA"
+            12 -> "BAHASA TIDAK DISOKONG"
             else -> "RALAT SPEECH: $error"
         }
 
