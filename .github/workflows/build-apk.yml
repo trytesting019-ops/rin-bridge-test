@@ -50,6 +50,14 @@ jobs:
           grep -n -E "e: |error:|Unresolved reference|Compilation error" kotlin-error.log || true
           exit $RESULT
 
+      - name: Show Kotlin Compiler Errors
+        if: always()
+        run: |
+          echo "===== KOTLIN ERRORS ====="
+          grep -n -B 8 -A 12 -E "e: |error:" kotlin-error.log || true
+          echo "===== SOURCE FILE LIST ====="
+          find app/src/main/java -type f -name "*.kt" -print
+
       - name: Build APK
         if: success()
         run: gradle assembleDebug --stacktrace
