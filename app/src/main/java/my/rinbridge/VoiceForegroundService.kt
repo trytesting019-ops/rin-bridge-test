@@ -22,6 +22,7 @@ class VoiceForegroundService : Service(), RecognitionListener {
     private var speechRecognizer: SpeechRecognizer? = null
     private val handler = Handler(Looper.getMainLooper())
     private var listening = false
+    private var wakeDetected = false
 
     companion object {
         const val CHANNEL_ID = "rin_voice_channel"
@@ -68,7 +69,9 @@ class VoiceForegroundService : Service(), RecognitionListener {
     private fun startListening() {
         if (!listening) return
 
-        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+        val intent = Intent(
+            RecognizerIntent.ACTION_RECOGNIZE_SPEECH
+        ).apply {
             putExtra(
                 RecognizerIntent.EXTRA_LANGUAGE_MODEL,
                 RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
@@ -77,8 +80,14 @@ class VoiceForegroundService : Service(), RecognitionListener {
                 RecognizerIntent.EXTRA_LANGUAGE,
                 "ms-MY"
             )
-            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
+            putExtra(
+                RecognizerIntent.EXTRA_PARTIAL_RESULTS,
+                true
+            )
+            putExtra(
+                RecognizerIntent.EXTRA_MAX_RESULTS,
+                3
+            )
         }
 
         try {
@@ -91,23 +100,60 @@ class VoiceForegroundService : Service(), RecognitionListener {
     }
 
     override fun onResults(results: Bundle?) {
+
         val matches = results?.getStringArrayList(
             SpeechRecognizer.RESULTS_RECOGNITION
         )
 
-        val spoken = matches?.firstOrNull()?.lowercase(Locale.ROOT) ?: ""
+        val spoken = matches?.firstOrNull()
+            ?.lowercase(Locale.ROOT) ?: ""
 
         Log.d("RinBridge", "Heard: $spoken")
 
-        if (
+        val hasWakeWord =
             spoken.contains("hey rin") ||
             spoken.contains("hei rin") ||
             spoken.contains("hai rin")
-        ) {
+
+        if (hasWakeWord) {
+            wakeDetected = true
             updateStatus("HEY RIN DETECTED")
+
+            val commandText = spoken
+                .replace(
+                    Regex("\\b(hey|hei|hai)\\s+rin\\b"),
+                    ""
+                )
+                .trim()
+
+            if (commandText.isNotEmpty()) {
+                processCommand(commandText)
+            }
+
+        } else if (wakeDetected && spoken.isNotBlank()) {
+            processCommand(spoken)
         }
 
         restartListening()
+    }
+
+    private fun processCommand(text: String) {
+
+        val command = CommandRouter.parse(text)
+
+        if (command == RinCommand.UNKNOWN) {
+            updateStatus("Arahan tidak dikenali: $text")
+            return
+        }
+
+        MusicController.execute(
+            this,
+            command
+        ) { response ->
+
+            updateStatus(response)
+            wakeDetected = false
+        }
     }
 
     override fun onError(error: Int) {
@@ -118,12 +164,17 @@ class VoiceForegroundService : Service(), RecognitionListener {
     private fun restartListening() {
         if (!listening) return
 
+        handler.removeCallbacksAndMessages(null)
+
         handler.postDelayed({
-            if (listening) startListening()
+            if (listening) {
+                startListening()
+            }
         }, 700)
     }
 
     private fun updateStatus(status: String) {
+
         val intent = Intent(ACTION_STATUS).apply {
             setPackage(packageName)
             putExtra(EXTRA_STATUS, status)
@@ -132,7 +183,8 @@ class VoiceForegroundService : Service(), RecognitionListener {
         sendBroadcast(intent)
 
         val manager =
-            getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+            getSystemService(NOTIFICATION_SERVICE)
+                as NotificationManager
 
         manager.notify(
             NOTIFICATION_ID,
@@ -142,6 +194,7 @@ class VoiceForegroundService : Service(), RecognitionListener {
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+
             val channel = NotificationChannel(
                 CHANNEL_ID,
                 "Rin Voice Assistant",
@@ -149,26 +202,37 @@ class VoiceForegroundService : Service(), RecognitionListener {
             )
 
             val manager =
-                getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+                getSystemService(NOTIFICATION_SERVICE)
+                    as NotificationManager
 
             manager.createNotificationChannel(channel)
         }
     }
 
-    private fun buildNotification(status: String): Notification {
+    private fun buildNotification(
+        status: String
+    ): Notification {
+
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+
             Notification.Builder(this, CHANNEL_ID)
                 .setContentTitle("RinBridge")
                 .setContentText(status)
-                .setSmallIcon(android.R.drawable.ic_btn_speak_now)
+                .setSmallIcon(
+                    android.R.drawable.ic_btn_speak_now
+                )
                 .setOngoing(true)
                 .build()
+
         } else {
+
             @Suppress("DEPRECATION")
             Notification.Builder(this)
                 .setContentTitle("RinBridge")
                 .setContentText(status)
-                .setSmallIcon(android.R.drawable.ic_btn_speak_now)
+                .setSmallIcon(
+                    android.R.drawable.ic_btn_speak_now
+                )
                 .setOngoing(true)
                 .build()
         }
