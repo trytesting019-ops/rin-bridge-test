@@ -1,11 +1,13 @@
 
 package my.rinbridge
 
+import android.Manifest
 import android.app.Service
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -21,15 +23,25 @@ class VoiceForegroundService : Service(), RecognitionListener {
 
     private var speechRecognizer: SpeechRecognizer? = null
     private val handler = Handler(Looper.getMainLooper())
+
     private var listening = false
+    private var recognizerActive = false
     private var wakeDetected = false
+
+    private val restartRunnable = Runnable {
+        if (listening && !recognizerActive) {
+            startListening()
+        }
+    }
 
     companion object {
         const val CHANNEL_ID = "rin_voice_channel"
         const val NOTIFICATION_ID = 101
         const val ACTION_STATUS = "my.rinbridge.RIN_STATUS"
         const val EXTRA_STATUS = "status"
+
         private const val TAG = "RinBridge"
+        private const val RESTART_DELAY = 1500L
     }
 
     override fun onCreate() {
@@ -48,6 +60,14 @@ class VoiceForegroundService : Service(), RecognitionListener {
             buildNotification("Rin sedang bersedia")
         )
 
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            updateStatus("Kebenaran mikrofon tiada")
+            stopSelf()
+            return START_NOT_STICKY
+        }
+
         if (!SpeechRecognizer.isRecognitionAvailable(this)) {
             updateStatus("Speech Recognition tidak tersedia")
             stopSelf()
@@ -57,32 +77,39 @@ class VoiceForegroundService : Service(), RecognitionListener {
         if (speechRecognizer == null) {
             speechRecognizer =
                 SpeechRecognizer.createSpeechRecognizer(this)
+
             speechRecognizer?.setRecognitionListener(this)
         }
 
-        listening = true
-        startListening()
+        if (!listening) {
+            listening = true
+            startListening()
+        }
 
         return START_STICKY
     }
 
     private fun startListening() {
-        if (!listening) return
+        if (!listening || recognizerActive) return
+
+        val recognizer = speechRecognizer ?: return
 
         val speechIntent =
             Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+
                 putExtra(
                     RecognizerIntent.EXTRA_LANGUAGE_MODEL,
                     RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
                 )
-                putExtra(
-                    RecognizerIntent.EXTRA_LANGUAGE,
-                    "en-US"
-                )
+
+                // Biarkan Android menggunakan bahasa lalai.
+                // Jangan paksa en-US atau ms-MY dahulu.
+
                 putExtra(
                     RecognizerIntent.EXTRA_PARTIAL_RESULTS,
                     true
                 )
+
                 putExtra(
                     RecognizerIntent.EXTRA_MAX_RESULTS,
                     3
@@ -91,11 +118,17 @@ class VoiceForegroundService : Service(), RecognitionListener {
 
         try {
             updateStatus("MENYAMBUNG MIKROFON...")
-            speechRecognizer?.startListening(speechIntent)
+            recognizerActive = true
+            recognizer.startListening(speechIntent)
+
         } catch (e: Exception) {
+            recognizerActive = false
+
             Log.e(TAG, "Start listening failed", e)
+
             updateStatus("GAGAL MULA: ${e.message}")
-            restartListening()
+
+            scheduleRestart()
         }
     }
 
@@ -120,6 +153,8 @@ class VoiceForegroundService : Service(), RecognitionListener {
     }
 
     override fun onResults(results: Bundle?) {
+        recognizerActive = false
+
         val matches = results?.getStringArrayList(
             SpeechRecognizer.RESULTS_RECOGNITION
         )
@@ -131,7 +166,7 @@ class VoiceForegroundService : Service(), RecognitionListener {
 
         if (spoken.isBlank()) {
             updateStatus("TIADA SUARA DIKENALI")
-            restartListening()
+            scheduleRestart()
             return
         }
 
@@ -142,6 +177,7 @@ class VoiceForegroundService : Service(), RecognitionListener {
 
         if (hasWakeWord) {
             wakeDetected = true
+
             updateStatus("HEY RIN DETECTED")
 
             val commandText = spoken
@@ -157,11 +193,12 @@ class VoiceForegroundService : Service(), RecognitionListener {
 
         } else if (wakeDetected) {
             processCommand(spoken)
+
         } else {
             updateStatus("SUARA DITERIMA: $spoken")
         }
 
-        restartListening()
+        scheduleRestart()
     }
 
     private fun processCommand(text: String) {
@@ -180,39 +217,88 @@ class VoiceForegroundService : Service(), RecognitionListener {
     }
 
     override fun onError(error: Int) {
+        recognizerActive = false
+
         val message = when (error) {
-            SpeechRecognizer.ERROR_AUDIO -> "RALAT AUDIO"
-            SpeechRecognizer.ERROR_CLIENT -> "RALAT CLIENT"
+            SpeechRecognizer.ERROR_AUDIO ->
+                "RALAT AUDIO"
+
+            SpeechRecognizer.ERROR_CLIENT ->
+                "RALAT CLIENT"
+
             SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS ->
-                "Kebenaran mikrofon tiada"
-            SpeechRecognizer.ERROR_NETWORK -> "RALAT NETWORK"
+                "KEBENARAN MIKROFON TIADA"
+
+            SpeechRecognizer.ERROR_NETWORK ->
+                "RALAT NETWORK"
+
             SpeechRecognizer.ERROR_NETWORK_TIMEOUT ->
                 "NETWORK TIMEOUT"
-            SpeechRecognizer.ERROR_NO_MATCH -> "SUARA TIDAK DIKENALI"
+
+            SpeechRecognizer.ERROR_NO_MATCH ->
+                "SUARA TIDAK DIKENALI"
+
             SpeechRecognizer.ERROR_RECOGNIZER_BUSY ->
                 "SPEECH RECOGNIZER BUSY"
-            SpeechRecognizer.ERROR_SERVER -> "RALAT SERVER"
+
+            SpeechRecognizer.ERROR_SERVER ->
+                "RALAT SERVER"
+
             SpeechRecognizer.ERROR_SPEECH_TIMEOUT ->
                 "TIADA SUARA DITERIMA"
-            12 -> "BAHASA TIDAK DISOKONG"
-            else -> "RALAT SPEECH: $error"
+
+            12 ->
+                "BAHASA TIDAK DISOKONG"
+
+            13 ->
+                "BAHASA BELUM TERSEDIA"
+
+            else ->
+                "RALAT SPEECH: $error"
         }
 
-        Log.e(TAG, message)
+        Log.e(TAG, "$message ($error)")
         updateStatus(message)
-        restartListening()
+
+        if (error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY) {
+            recreateRecognizer()
+        } else {
+            scheduleRestart()
+        }
     }
 
-    private fun restartListening() {
+    private fun scheduleRestart() {
         if (!listening) return
 
-        handler.removeCallbacksAndMessages(null)
+        handler.removeCallbacks(restartRunnable)
+        handler.postDelayed(
+            restartRunnable,
+            RESTART_DELAY
+        )
+    }
+
+    private fun recreateRecognizer() {
+        handler.removeCallbacks(restartRunnable)
+
+        try {
+            speechRecognizer?.destroy()
+        } catch (e: Exception) {
+            Log.e(TAG, "Destroy recognizer failed", e)
+        }
+
+        speechRecognizer = null
+        recognizerActive = false
 
         handler.postDelayed({
             if (listening) {
+                speechRecognizer =
+                    SpeechRecognizer.createSpeechRecognizer(this)
+
+                speechRecognizer?.setRecognitionListener(this)
+
                 startListening()
             }
-        }, 1200)
+        }, 2000)
     }
 
     private fun updateStatus(status: String) {
@@ -237,6 +323,7 @@ class VoiceForegroundService : Service(), RecognitionListener {
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+
             val channel = NotificationChannel(
                 CHANNEL_ID,
                 "Rin Voice Assistant",
@@ -253,13 +340,16 @@ class VoiceForegroundService : Service(), RecognitionListener {
 
     private fun buildNotification(status: String): Notification {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+
             Notification.Builder(this, CHANNEL_ID)
                 .setContentTitle("RinBridge")
                 .setContentText(status)
                 .setSmallIcon(android.R.drawable.ic_btn_speak_now)
                 .setOngoing(true)
                 .build()
+
         } else {
+
             @Suppress("DEPRECATION")
             Notification.Builder(this)
                 .setContentTitle("RinBridge")
@@ -272,16 +362,23 @@ class VoiceForegroundService : Service(), RecognitionListener {
 
     override fun onDestroy() {
         listening = false
+        recognizerActive = false
+
         handler.removeCallbacksAndMessages(null)
+
         speechRecognizer?.destroy()
         speechRecognizer = null
+
         super.onDestroy()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onRmsChanged(rmsdB: Float) {}
+
     override fun onBufferReceived(buffer: ByteArray?) {}
+
     override fun onEndOfSpeech() {}
+
     override fun onEvent(eventType: Int, params: Bundle?) {}
 }
