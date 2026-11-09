@@ -29,6 +29,7 @@ class VoiceForegroundService : Service(), RecognitionListener {
         const val NOTIFICATION_ID = 101
         const val ACTION_STATUS = "my.rinbridge.RIN_STATUS"
         const val EXTRA_STATUS = "status"
+        private const val TAG = "RinBridge"
     }
 
     override fun onCreate() {
@@ -48,7 +49,7 @@ class VoiceForegroundService : Service(), RecognitionListener {
         )
 
         if (!SpeechRecognizer.isRecognitionAvailable(this)) {
-            updateStatus("Speech recognition tidak tersedia")
+            updateStatus("Speech Recognition tidak tersedia")
             stopSelf()
             return START_NOT_STICKY
         }
@@ -56,7 +57,6 @@ class VoiceForegroundService : Service(), RecognitionListener {
         if (speechRecognizer == null) {
             speechRecognizer =
                 SpeechRecognizer.createSpeechRecognizer(this)
-
             speechRecognizer?.setRecognitionListener(this)
         }
 
@@ -69,38 +69,57 @@ class VoiceForegroundService : Service(), RecognitionListener {
     private fun startListening() {
         if (!listening) return
 
-        val intent = Intent(
-            RecognizerIntent.ACTION_RECOGNIZE_SPEECH
-        ).apply {
-            putExtra(
-                RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-                RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
-            )
-            putExtra(
-                RecognizerIntent.EXTRA_LANGUAGE,
-                "ms-MY"
-            )
-            putExtra(
-                RecognizerIntent.EXTRA_PARTIAL_RESULTS,
-                true
-            )
-            putExtra(
-                RecognizerIntent.EXTRA_MAX_RESULTS,
-                3
-            )
-        }
+        val speechIntent =
+            Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(
+                    RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                    RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
+                )
+                putExtra(
+                    RecognizerIntent.EXTRA_LANGUAGE,
+                    "ms-MY"
+                )
+                putExtra(
+                    RecognizerIntent.EXTRA_PARTIAL_RESULTS,
+                    true
+                )
+                putExtra(
+                    RecognizerIntent.EXTRA_MAX_RESULTS,
+                    3
+                )
+            }
 
         try {
-            speechRecognizer?.startListening(intent)
-            updateStatus("HEARING ON")
+            updateStatus("MENYAMBUNG MIKROFON...")
+            speechRecognizer?.startListening(speechIntent)
         } catch (e: Exception) {
-            Log.e("RinBridge", "Start listening failed", e)
+            Log.e(TAG, "Start listening failed", e)
+            updateStatus("GAGAL MULA: ${e.message}")
             restartListening()
         }
     }
 
-    override fun onResults(results: Bundle?) {
+    override fun onReadyForSpeech(params: Bundle?) {
+        updateStatus("MIKROFON SIAP - CAKAP SEKARANG")
+    }
 
+    override fun onBeginningOfSpeech() {
+        updateStatus("SUARA DIKESAN")
+    }
+
+    override fun onPartialResults(partialResults: Bundle?) {
+        val matches = partialResults?.getStringArrayList(
+            SpeechRecognizer.RESULTS_RECOGNITION
+        )
+
+        val spoken = matches?.firstOrNull() ?: ""
+
+        if (spoken.isNotBlank()) {
+            updateStatus("DENGAR: $spoken")
+        }
+    }
+
+    override fun onResults(results: Bundle?) {
         val matches = results?.getStringArrayList(
             SpeechRecognizer.RESULTS_RECOGNITION
         )
@@ -108,7 +127,13 @@ class VoiceForegroundService : Service(), RecognitionListener {
         val spoken = matches?.firstOrNull()
             ?.lowercase(Locale.ROOT) ?: ""
 
-        Log.d("RinBridge", "Heard: $spoken")
+        Log.d(TAG, "Heard: $spoken")
+
+        if (spoken.isBlank()) {
+            updateStatus("TIADA SUARA DIKENALI")
+            restartListening()
+            return
+        }
 
         val hasWakeWord =
             spoken.contains("hey rin") ||
@@ -130,34 +155,50 @@ class VoiceForegroundService : Service(), RecognitionListener {
                 processCommand(commandText)
             }
 
-        } else if (wakeDetected && spoken.isNotBlank()) {
+        } else if (wakeDetected) {
             processCommand(spoken)
+        } else {
+            updateStatus("SUARA DITERIMA: $spoken")
         }
 
         restartListening()
     }
 
     private fun processCommand(text: String) {
-
         val command = CommandRouter.parse(text)
 
         if (command == RinCommand.UNKNOWN) {
-            updateStatus("Arahan tidak dikenali: $text")
+            updateStatus("ARAHAN TIDAK DIKENALI: $text")
+            wakeDetected = false
             return
         }
 
-        MusicController.execute(
-            this,
-            command
-        ) { response ->
-
+        MusicController.execute(this, command) { response ->
             updateStatus(response)
             wakeDetected = false
         }
     }
 
     override fun onError(error: Int) {
-        Log.e("RinBridge", "Speech error: $error")
+        val message = when (error) {
+            SpeechRecognizer.ERROR_AUDIO -> "RALAT AUDIO"
+            SpeechRecognizer.ERROR_CLIENT -> "RALAT CLIENT"
+            SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS ->
+                "Kebenaran mikrofon tiada"
+            SpeechRecognizer.ERROR_NETWORK -> "RALAT NETWORK"
+            SpeechRecognizer.ERROR_NETWORK_TIMEOUT ->
+                "NETWORK TIMEOUT"
+            SpeechRecognizer.ERROR_NO_MATCH -> "SUARA TIDAK DIKENALI"
+            SpeechRecognizer.ERROR_RECOGNIZER_BUSY ->
+                "SPEECH RECOGNIZER BUSY"
+            SpeechRecognizer.ERROR_SERVER -> "RALAT SERVER"
+            SpeechRecognizer.ERROR_SPEECH_TIMEOUT ->
+                "TIADA SUARA DITERIMA"
+            else -> "RALAT SPEECH: $error"
+        }
+
+        Log.e(TAG, message)
+        updateStatus(message)
         restartListening()
     }
 
@@ -170,10 +211,11 @@ class VoiceForegroundService : Service(), RecognitionListener {
             if (listening) {
                 startListening()
             }
-        }, 700)
+        }, 1200)
     }
 
     private fun updateStatus(status: String) {
+        Log.d(TAG, status)
 
         val intent = Intent(ACTION_STATUS).apply {
             setPackage(packageName)
@@ -194,7 +236,6 @@ class VoiceForegroundService : Service(), RecognitionListener {
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-
             val channel = NotificationChannel(
                 CHANNEL_ID,
                 "Rin Voice Assistant",
@@ -209,30 +250,20 @@ class VoiceForegroundService : Service(), RecognitionListener {
         }
     }
 
-    private fun buildNotification(
-        status: String
-    ): Notification {
-
+    private fun buildNotification(status: String): Notification {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-
             Notification.Builder(this, CHANNEL_ID)
                 .setContentTitle("RinBridge")
                 .setContentText(status)
-                .setSmallIcon(
-                    android.R.drawable.ic_btn_speak_now
-                )
+                .setSmallIcon(android.R.drawable.ic_btn_speak_now)
                 .setOngoing(true)
                 .build()
-
         } else {
-
             @Suppress("DEPRECATION")
             Notification.Builder(this)
                 .setContentTitle("RinBridge")
                 .setContentText(status)
-                .setSmallIcon(
-                    android.R.drawable.ic_btn_speak_now
-                )
+                .setSmallIcon(android.R.drawable.ic_btn_speak_now)
                 .setOngoing(true)
                 .build()
         }
@@ -248,11 +279,8 @@ class VoiceForegroundService : Service(), RecognitionListener {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    override fun onReadyForSpeech(params: Bundle?) {}
-    override fun onBeginningOfSpeech() {}
     override fun onRmsChanged(rmsdB: Float) {}
     override fun onBufferReceived(buffer: ByteArray?) {}
     override fun onEndOfSpeech() {}
-    override fun onPartialResults(partialResults: Bundle?) {}
     override fun onEvent(eventType: Int, params: Bundle?) {}
 }
