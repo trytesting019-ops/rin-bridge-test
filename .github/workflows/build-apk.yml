@@ -26,26 +26,36 @@ jobs:
 
       - name: Check Manifest File
         run: |
-          echo "Checking AndroidManifest.xml"
           test -f app/src/main/AndroidManifest.xml
-
-      - name: Display Manifest
-        run: |
-          echo "===== MANIFEST CONTENT ====="
-          cat -A app/src/main/AndroidManifest.xml
 
       - name: Validate Manifest XML
         run: |
           sudo apt-get update
           sudo apt-get install -y libxml2-utils
           xmllint --noout app/src/main/AndroidManifest.xml
-
           echo "MANIFEST XML IS VALID"
 
+      - name: List Kotlin Source Files
+        run: |
+          echo "===== KOTLIN FILES ====="
+          find app/src/main/java -type f -name "*.kt" -print
+
+      - name: Build Kotlin with Detailed Log
+        shell: bash
+        run: |
+          set +e
+          gradle :app:compileDebugKotlin --rerun-tasks --info --stacktrace 2>&1 | tee kotlin-error.log
+          RESULT=${PIPESTATUS[0]}
+          echo "===== KOTLIN ERROR SUMMARY ====="
+          grep -n -E "e: |error:|Unresolved reference|Compilation error" kotlin-error.log || true
+          exit $RESULT
+
       - name: Build APK
+        if: success()
         run: gradle assembleDebug --stacktrace
 
       - name: Upload APK
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: RinBridge-debug-APK
