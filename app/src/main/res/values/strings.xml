@@ -1,6 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">RinBridge</string>
-    <string name="accessibility_description">Mengesan arahan Rin yang ditandakan secara khusus pada skrin ChatGPT. Kandungan skrin boleh dibaca apabila servis ini diaktifkan.</string>
-    <string name="accessibility_service_name">RinBridge untuk ChatGPT</string>
 </resources>
