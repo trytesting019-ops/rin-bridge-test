@@ -1,4 +1,4 @@
-name = "rinbridge-relay"
+name = "rin-bridge"
 main = "worker.js"
 compatibility_date = "2026-11-10"
 
