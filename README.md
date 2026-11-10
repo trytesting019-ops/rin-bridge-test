@@ -72,3 +72,24 @@ The `cloudflare/` folder contains a small HTTPS command relay and an OpenAPI sch
 
 ### Current status
 This is the relay server and ChatGPT Action contract only. It is not deployed, no live endpoint exists yet, and the current Android APK does not poll this relay. End-to-end control is therefore not available yet.
+
+
+## Android relay client (initial implementation)
+
+The Android app now includes a foreground HTTPS polling client:
+- Enter the deployed Worker HTTPS URL and the device token in RinBridge.
+- Tap **Sambung ChatGPT** to poll the relay every five seconds.
+- Tap **Putuskan Relay** to stop polling.
+- The Android client uses the fixed device ID `doogee-s200-plus`.
+- It accepts only the command allow-list implemented by the Worker.
+- The app stores the device token in private Android app preferences; it is not committed to source control.
+
+### Important setup note
+Create a long random `DEVICE_TOKEN` and `ADMIN_TOKEN` separately. Save the device token securely because it must be entered into the Android app. Configure both as Cloudflare Worker secrets. Configure the ChatGPT Action with the admin token only. The app must never receive the admin token.
+
+### Current end-to-end limitations
+- The Worker is source code only; it has not been deployed to a live Cloudflare account.
+- The ChatGPT Action schema is provided for a **custom GPT Action**. It does not automatically add remote-control ability to every ordinary ChatGPT conversation.
+- The Android relay client is an initial implementation and still requires a successful GitHub build and real-device testing.
+- Android may restrict launching another app from a background service. Media commands and app-launch behavior must be verified on the actual device.
+- Do not paste either token into a public issue, chat, or repository.
