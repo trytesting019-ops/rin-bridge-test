@@ -1,37 +1,49 @@
-# Rin Bridge Test 0.1
+# RinBridge
 
-Prototaip sumber Android untuk ujian awal pada Doogee S200 Plus.
+Prototaip Android untuk Doogee S200 Plus dan Android head unit. Projek ini menyediakan arahan suara tempatan serta laluan arahan bertanda daripada teks ChatGPT yang kelihatan.
 
-## Fungsi yang ada
-- Speech-to-Text melalui Android Recognizer Intent (permintaan bahasa ms-MY).
-- Text-to-Speech melalui enjin TTS Android (cuba ms-MY, fallback en-US).
-- Butang ujian untuk membuka WhatsApp.
-- Accessibility Service pilihan yang memeriksa teks peristiwa daripada aplikasi ChatGPT untuk penanda tepat `RIN_BRIDGE:OPEN_WHATSAPP`.
+## Fungsi semasa
+- Perkhidmatan suara latar depan menggunakan Android SpeechRecognizer.
+- Kata panggilan: "Hey Rin", "Hei Rin" atau "Hai Rin".
+- Kawalan muzik asas: main, jeda, henti, seterusnya dan sebelumnya.
+- Buka Musicolet atau WhatsApp melalui arahan bertanda.
+- Accessibility Service pilihan yang hanya memeriksa peristiwa daripada aplikasi ChatGPT (com.openai.chatgpt) dan mencari penanda arahan yang dibenarkan.
 
-## Batasan penting
-- Ini **projek sumber**, bukan APK siap atau telah dipasang.
-- Accessibility Service perlu diaktifkan sendiri melalui tetapan Android. Ia mempunyai akses sensitif kepada kandungan skrin; aktifkan hanya jika memahami risikonya.
-- Android/versi ChatGPT mungkin tidak mendedahkan teks mesej melalui accessibility event. Jika penanda tidak dapat dikesan, laluan itu tidak akan berfungsi dan perlu diuji pada telefon.
-- Android boleh menyekat pelancaran aktiviti dari latar belakang. Butang ujian dalam aplikasi ialah laluan manual yang lebih boleh diharap.
-- STT mungkin memerlukan enjin pengecaman suara yang dipasang dan rangkaian; projek ini tidak menjanjikan operasi luar talian.
-- Prototaip ini tidak menghantar data ke pelayan Rin atau mana-mana pelayan tersuai. Enjin pengecaman/TTS yang dipilih Android mungkin mempunyai dasar rangkaian dan privasi tersendiri.
-- Belum ada integrasi automatik dua hala dengan ChatGPT. Penanda arahan perlu benar-benar muncul dalam teks yang boleh dibaca oleh Accessibility Service.
+## Penanda arahan yang disokong
+Letakkan satu penanda tepat pada teks yang kelihatan dalam ChatGPT:
 
-## Cara bina
-1. Ekstrak ZIP.
-2. Buka folder `RinBridge_Test` dalam Android Studio.
-3. Benarkan Gradle sync dan pasang Android SDK Platform 35 jika diminta.
-4. Bina `app` > `assembleDebug`.
-5. Pasang APK debug pada telefon dan buka `Rin Bridge Test`.
+- RIN_BRIDGE:OPEN_WHATSAPP
+- RIN_BRIDGE:OPEN_MUSICOLET
+- RIN_BRIDGE:PLAY
+- RIN_BRIDGE:PAUSE
+- RIN_BRIDGE:STOP
+- RIN_BRIDGE:NEXT
+- RIN_BRIDGE:PREVIOUS
 
-## Ujian pertama
-1. Tekan `Uji suara Rin (TTS)`.
-2. Tekan `Cakap → tulisan (STT)` dan sebut "buka WhatsApp".
-3. Tekan `Uji buka WhatsApp`.
-4. Hanya selepas ujian asas berjaya, pertimbangkan mengaktifkan Accessibility Service melalui butang tetapan. Uji penanda `RIN_BRIDGE:OPEN_WHATSAPP` pada skrin ChatGPT.
+Servis mengabaikan arahan yang tidak berada dalam senarai ini. Penanda yang sama tidak akan dijalankan berulang kali selagi ia kekal kelihatan; ia boleh dicetuskan semula selepas penanda hilang daripada paparan.
 
-## Konfigurasi
-- Package aplikasi: `my.rinbridge.test`
-- Minimum Android: API 26
-- Sasaran Android: API 32 (untuk prototaip awal)
-- Penanda arahan: `RIN_BRIDGE:OPEN_WHATSAPP`
+## Pasang dan aktifkan
+1. Pasang APK debug yang dibina oleh GitHub Actions.
+2. Buka RinBridge dan benarkan akses mikrofon jika mahu menggunakan "Hey Rin".
+3. Untuk kawalan daripada ChatGPT, buka butang tetapan Accessibility dalam aplikasi.
+4. Aktifkan RinBridge untuk ChatGPT secara manual pada tetapan Android.
+5. Buka ChatGPT dan uji dengan satu penanda yang disenaraikan di atas.
+
+## Privasi dan had penting
+- Accessibility Service ialah kebenaran sensitif: apabila diaktifkan, Android membenarkannya membaca teks tetingkap ChatGPT yang dipaparkan. Ia ditapis kepada pakej ChatGPT dan tidak menghantar teks skrin ke pelayan tersuai.
+- Pengaktifan Accessibility mesti dibuat sendiri oleh pemilik telefon.
+- Android/versi ChatGPT mungkin tidak mendedahkan teks jawapan melalui accessibility tree. Jika begitu, penanda tidak akan dikesan; ini mesti disahkan pada peranti sebenar.
+- Android boleh menyekat pelancaran aplikasi dari latar belakang bergantung pada versi dan keadaan peranti.
+- Pengecaman suara Android mungkin memerlukan enjin bahasa dan rangkaian. Operasi luar talian tidak dijamin.
+- Ini bukan sambungan API rasmi ChatGPT dan bukan kawalan jauh penuh. Ia hanya bertindak balas kepada penanda yang kelihatan dan arahan yang disenaraikan.
+
+## Bina APK
+GitHub Actions menjalankan workflow .github/workflows/build-apk.yml pada setiap push ke main. Selepas workflow berjaya, muat turun artifak RinBridge-debug-APK daripada tab Actions.
+
+## Butiran projek
+- Application ID: my.rinbridge
+- Namespace: my.rinbridge
+- Minimum Android: API 23
+- Compile SDK: 35
+- Target SDK: 35
+- Java/Kotlin target: 17
