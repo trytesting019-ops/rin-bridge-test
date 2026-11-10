@@ -32,15 +32,17 @@ class MainActivity : Activity() {
     private val statusReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
 
-            if (intent?.action == VoiceForegroundService.ACTION_STATUS) {
-
+            val action = intent?.action ?: return
+            if (action == VoiceForegroundService.ACTION_STATUS ||
+                action == RelayForegroundService.ACTION_STATUS) {
                 val status = intent.getStringExtra(
-                    VoiceForegroundService.EXTRA_STATUS
+                    if (action == RelayForegroundService.ACTION_STATUS)
+                        RelayForegroundService.EXTRA_STATUS
+                    else VoiceForegroundService.EXTRA_STATUS
                 ) ?: return
 
                 runOnUiThread {
                     statusText.text = "Status: $status"
-
                     if (status == "HEY RIN DETECTED") {
                         Toast.makeText(
                             this@MainActivity,
@@ -100,6 +102,67 @@ class MainActivity : Activity() {
             setPadding(0, 15, 0, 25)
         }
 
+        val relayTitle = TextView(this).apply {
+            text = "SAMBUNGAN CHATGPT"
+            textSize = 18f
+            gravity = Gravity.CENTER
+            setTextColor(android.graphics.Color.CYAN)
+            setPadding(0, 24, 0, 8)
+        }
+
+        val relayUrlInput = EditText(this).apply {
+            hint = "URL Relay HTTPS (https://...)"
+            singleLine = true
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                android.text.InputType.TYPE_TEXT_VARIATION_URI
+            setTextColor(android.graphics.Color.WHITE)
+            setHintTextColor(android.graphics.Color.LTGRAY)
+        }
+
+        val relayTokenInput = EditText(this).apply {
+            hint = "Device Token"
+            singleLine = true
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+            setTextColor(android.graphics.Color.WHITE)
+            setHintTextColor(android.graphics.Color.LTGRAY)
+        }
+
+        val relayStartButton = Button(this).apply {
+            text = "Sambung ChatGPT"
+            setOnClickListener {
+                val url = relayUrlInput.text.toString().trim().trimEnd('/')
+                val token = relayTokenInput.text.toString().trim()
+                if (!url.startsWith("https://") || token.length < 24) {
+                    Toast.makeText(
+                        this@MainActivity,
+                        "Masukkan URL HTTPS dan Device Token yang sah",
+                        Toast.LENGTH_LONG
+                    ).show()
+                } else {
+                    getSharedPreferences("rinbridge_relay", MODE_PRIVATE)
+                        .edit()
+                        .putString("relay_url", url)
+                        .putString("device_token", token)
+                        .apply()
+                    val relayIntent = Intent(this@MainActivity, RelayForegroundService::class.java)
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        startForegroundService(relayIntent)
+                    } else {
+                        startService(relayIntent)
+                    }
+                    Toast.makeText(this@MainActivity, "Sambungan relay dimulakan", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+
+        val relayStopButton = Button(this).apply {
+            text = "Putuskan Relay"
+            setOnClickListener {
+                stopService(Intent(this@MainActivity, RelayForegroundService::class.java))
+            }
+        }
+
         val startButton = Button(this).apply {
             text = "Hidupkan Hey Rin"
             setOnClickListener {
@@ -128,6 +191,11 @@ class MainActivity : Activity() {
         layout.addView(title)
         layout.addView(description)
         layout.addView(statusText)
+        layout.addView(relayTitle)
+        layout.addView(relayUrlInput)
+        layout.addView(relayTokenInput)
+        layout.addView(relayStartButton)
+        layout.addView(relayStopButton)
         layout.addView(startButton)
         layout.addView(stopButton)
         layout.addView(testButton)
@@ -139,9 +207,10 @@ class MainActivity : Activity() {
         super.onResume()
 
         if (!receiverRegistered) {
-            val filter = IntentFilter(
-                VoiceForegroundService.ACTION_STATUS
-            )
+            val filter = IntentFilter().apply {
+                addAction(VoiceForegroundService.ACTION_STATUS)
+                addAction(RelayForegroundService.ACTION_STATUS)
+            }
 
             if (Build.VERSION.SDK_INT >= 33) {
                 registerReceiver(
