@@ -1,0 +1,48 @@
+openapi: 3.1.0
+info:
+  title: RinBridge Command Relay
+  version: 1.0.0
+  description: Send allow-listed commands to a paired RinBridge Android device.
+servers:
+  - url: https://YOUR-WORKER.workers.dev
+security:
+  - BearerAuth: []
+paths:
+  /v1/command:
+    post:
+      operationId: sendRinBridgeCommand
+      summary: Send a command to a paired Android device
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [device_id, command]
+              properties:
+                device_id:
+                  type: string
+                  example: doogee-s200-plus
+                command:
+                  type: string
+                  enum: [OPEN_WHATSAPP, OPEN_MUSICOLET, PLAY, PAUSE, STOP, NEXT, PREVIOUS]
+      responses:
+        "202":
+          description: Command queued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  queued: { type: boolean }
+                  id: { type: string }
+                  command: { type: string }
+                  device_id: { type: string }
+        "401":
+          description: Invalid relay credential
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
