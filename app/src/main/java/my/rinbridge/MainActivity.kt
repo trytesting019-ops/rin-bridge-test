@@ -114,15 +114,6 @@ class MainActivity : Activity() {
             }
         }
 
-        val accessibilityButton = Button(this).apply {
-            text = "Buka Accessibility Settings"
-            setOnClickListener {
-                startActivity(
-                    Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
-                )
-            }
-        }
-
         val testButton = Button(this).apply {
             text = "Test RinBridge"
             setOnClickListener {
@@ -139,7 +130,6 @@ class MainActivity : Activity() {
         layout.addView(statusText)
         layout.addView(startButton)
         layout.addView(stopButton)
-        layout.addView(accessibilityButton)
         layout.addView(testButton)
 
         setContentView(layout)
