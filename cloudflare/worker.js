@@ -14,7 +14,7 @@ function bearer(request) {
 }
 
 function safeEqual(a, b) {
-  if (!a || !b || a.length !== b.length) return false;
+  if (typeof a !== "string" || typeof b !== "string" || !a || !b || a.length !== b.length) return false;
   let out = 0;
   for (let i = 0; i < a.length; i++) out |= a.charCodeAt(i) ^ b.charCodeAt(i);
   return out === 0;
