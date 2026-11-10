@@ -6,7 +6,6 @@ on:
       - main
     paths:
       - "cloudflare/**"
-      - ".github/workflows/deploy-worker.yml"
   workflow_dispatch:
 
 jobs:
