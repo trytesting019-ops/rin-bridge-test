@@ -47,3 +47,28 @@ GitHub Actions menjalankan workflow .github/workflows/build-apk.yml pada setiap 
 - Compile SDK: 35
 - Target SDK: 35
 - Java/Kotlin target: 17
+
+
+## RinBridge Internet Relay (prototype)
+
+The `cloudflare/` folder contains a small HTTPS command relay and an OpenAPI schema for a ChatGPT custom GPT Action.
+
+### Security model
+- The relay accepts only the fixed allow-list of commands in `worker.js`.
+- ChatGPT Action authenticates with the server-side `ADMIN_TOKEN`.
+- The Android device authenticates with a separate `DEVICE_TOKEN`.
+- Tokens must be created as Cloudflare Worker secrets. Never commit tokens to this repository or put the admin token in the APK.
+- The relay stores command names, device IDs, command IDs and timestamps only. Commands expire after 10 minutes.
+- The Android app still needs a polling client and a pairing/settings screen before it can receive commands. This repository change does not yet complete that Android client.
+
+### Cloudflare setup (server side)
+1. Create a Cloudflare Worker named `rinbridge-relay`.
+2. Create a Workers KV namespace and bind it as `COMMANDS`.
+3. Replace the placeholder KV namespace ID in `cloudflare/wrangler.toml`.
+4. Add Worker secrets `ADMIN_TOKEN` and `DEVICE_TOKEN` using long, random values. Keep them separate.
+5. Deploy `cloudflare/worker.js` and test `GET /health`.
+6. In a ChatGPT custom GPT, add an Action using `cloudflare/chatgpt-openapi.yaml`, replace `YOUR-WORKER` with the deployed Worker hostname, and configure Bearer authentication with the `ADMIN_TOKEN`.
+7. Do not enable device commands until the Android polling client is installed and configured with the device token.
+
+### Current status
+This is the relay server and ChatGPT Action contract only. It is not deployed, no live endpoint exists yet, and the current Android APK does not poll this relay. End-to-end control is therefore not available yet.
