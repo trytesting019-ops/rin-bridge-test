@@ -10,7 +10,7 @@ function json(data, status = 200) {
 }
 
 function bearer(request) {
-  return (request.headers.get("Authorization") || "").replace(/^Bearer\\s+/i, "");
+  return (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "");
 }
 
 function safeEqual(a, b) {
@@ -32,6 +32,8 @@ export default {
     if (url.pathname === "/health" && request.method === "GET") {
       return json({ ok: true, service: "RinBridge Relay", version: 1 });
     }
+
+    if (!env.COMMANDS) return json({ error: "kv_binding_missing" }, 500);
 
     if (url.pathname === "/v1/command" && request.method === "POST") {
       if (!safeEqual(bearer(request), env.ADMIN_TOKEN)) return json({ error: "unauthorized" }, 401);
