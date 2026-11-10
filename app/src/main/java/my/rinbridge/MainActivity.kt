@@ -112,7 +112,7 @@ class MainActivity : Activity() {
 
         val relayUrlInput = EditText(this).apply {
             hint = "URL Relay HTTPS (https://...)"
-            singleLine = true
+            setSingleLine(true)
             inputType = android.text.InputType.TYPE_CLASS_TEXT or
                 android.text.InputType.TYPE_TEXT_VARIATION_URI
             setTextColor(android.graphics.Color.WHITE)
@@ -121,7 +121,7 @@ class MainActivity : Activity() {
 
         val relayTokenInput = EditText(this).apply {
             hint = "Device Token"
-            singleLine = true
+            setSingleLine(true)
             inputType = android.text.InputType.TYPE_CLASS_TEXT or
                 android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
             setTextColor(android.graphics.Color.WHITE)
