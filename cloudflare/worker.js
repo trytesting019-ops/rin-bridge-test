@@ -52,7 +52,7 @@ export default {
       const systemInstruction = {
         parts: [{ text: "Nama anda Rin, pembantu AI peribadi pengguna. Balas dalam Bahasa Melayu Malaysia secara lembut, tenang, mesra dan jelas. Panggil pengguna sayang apabila sesuai. Jangan mendakwa telah melakukan tindakan yang belum dilakukan. Jika tidak pasti, nyatakan dengan jujur." }]
       };
-      const models = ["gemini-3.8-flash", "gemini-3.5-flash-lite"];
+      const models = ["gemini-3.5-flash-lite", "gemini-3.8-flash"];
       let lastStatus = 502;
       let lastMessage = "Pembekal AI tidak dapat memproses permintaan.";
       for (const model of models) {
@@ -63,10 +63,11 @@ export default {
               "Content-Type": "application/json",
               "x-goog-api-key": env.GEMINI_API_KEY
             },
+            signal: AbortSignal.timeout(25000),
             body: JSON.stringify({
               systemInstruction,
               contents,
-              generationConfig: { temperature: 0.7, maxOutputTokens: 1200 }
+              generationConfig: { temperature: 0.7, maxOutputTokens: 700 }
             })
           });
           const result = await upstream.json().catch(() => ({}));
