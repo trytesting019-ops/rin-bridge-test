@@ -33,6 +33,55 @@ export default {
       return json({ ok: true, service: "RinBridge Relay", version: 1 });
     }
 
+    if (url.pathname === "/v1/transcribe" && request.method === "POST") {
+      if (!safeEqual(bearer(request), env.DEVICE_TOKEN)) return json({ error: "unauthorized" }, 401);
+      if (!env.GEMINI_API_KEY) return json({ error: "ai_not_configured" }, 503);
+      let body;
+      try { body = await request.json(); } catch { return json({ error: "invalid_json" }, 400); }
+      const audio = typeof body.audio === "string" ? body.audio : "";
+      const mimeType = typeof body.mimeType === "string" ? body.mimeType : "audio/mp4";
+      if (!audio || audio.length > 9000000 || !["audio/mp4", "audio/3gpp", "audio/aac", "audio/wav"].includes(mimeType)) return json({ error: "invalid_audio" }, 400);
+      try {
+        const upstream = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent", {
+          method: "POST", headers: { "Content-Type": "application/json", "x-goog-api-key": env.GEMINI_API_KEY },
+          signal: AbortSignal.timeout(25000),
+          body: JSON.stringify({ contents: [{ role: "user", parts: [
+            { text: "Transkripsikan rakaman ini tepat dalam Bahasa Melayu Malaysia. Kekalkan nama dan nombor. Pulangkan teks transkripsi sahaja tanpa penerangan." },
+            { inlineData: { mimeType, data: audio } }
+          ] }], generationConfig: { temperature: 0.1, maxOutputTokens: 500 } })
+        });
+        const result = await upstream.json().catch(() => ({}));
+        if (!upstream.ok) return json({ error: "transcription_failed", message: result?.error?.message || "Pengecaman audio gagal." }, 502);
+        const transcript = result?.candidates?.[0]?.content?.parts?.map(p => typeof p.text === "string" ? p.text : "").join("").trim();
+        if (!transcript) return json({ error: "empty_transcript" }, 502);
+        return json({ ok: true, transcript });
+      } catch (_error) { return json({ error: "transcription_timeout" }, 504); }
+    }
+
+    if (url.pathname === "/v1/tts" && request.method === "POST") {
+      if (!safeEqual(bearer(request), env.DEVICE_TOKEN)) return json({ error: "unauthorized" }, 401);
+      if (!env.GEMINI_API_KEY) return json({ error: "ai_not_configured" }, 503);
+      let body;
+      try { body = await request.json(); } catch { return json({ error: "invalid_json" }, 400); }
+      const text = typeof body.text === "string" ? body.text.trim() : "";
+      if (!text || text.length > 3000) return json({ error: "invalid_text" }, 400);
+      try {
+        const upstream = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash-tts:generateContent", {
+          method: "POST", headers: { "Content-Type": "application/json", "x-goog-api-key": env.GEMINI_API_KEY },
+          signal: AbortSignal.timeout(35000),
+          body: JSON.stringify({
+            contents: [{ role: "user", parts: [{ text: "Read the following exactly in a gentle, warm, calm female voice. Speak naturally in Standard Malay with a Malaysian accent, slightly affectionate and emotionally kind. Use a relaxed pace and clear pronunciation. Do not read these instructions aloud.\n\n" + text }] }],
+            generationConfig: { responseModalities: ["AUDIO"], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: "Vindemiatrix" } } } }
+          })
+        });
+        const result = await upstream.json().catch(() => ({}));
+        if (!upstream.ok) return json({ error: "tts_failed", message: result?.error?.message || "Penjanaan suara gagal." }, 502);
+        const audioPart = result?.candidates?.[0]?.content?.parts?.find(p => p.inlineData?.data);
+        if (!audioPart) return json({ error: "empty_audio" }, 502);
+        return json({ ok: true, audio: audioPart.inlineData.data, mimeType: audioPart.inlineData.mimeType || "audio/wav" });
+      } catch (_error) { return json({ error: "tts_timeout" }, 504); }
+    }
+
     if (url.pathname === "/v1/chat" && request.method === "POST") {
       if (!safeEqual(bearer(request), env.DEVICE_TOKEN)) return json({ error: "unauthorized" }, 401);
       if (!env.GEMINI_API_KEY) return json({ error: "ai_not_configured" }, 503);
