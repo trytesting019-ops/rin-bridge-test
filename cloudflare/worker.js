@@ -41,21 +41,34 @@ export default {
       const audio = typeof body.audio === "string" ? body.audio : "";
       const mimeType = typeof body.mimeType === "string" ? body.mimeType : "audio/mp4";
       if (!audio || audio.length > 9000000 || !["audio/mp4", "audio/3gpp", "audio/aac", "audio/wav"].includes(mimeType)) return json({ error: "invalid_audio" }, 400);
-      try {
-        const upstream = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent", {
-          method: "POST", headers: { "Content-Type": "application/json", "x-goog-api-key": env.GEMINI_API_KEY },
-          signal: AbortSignal.timeout(25000),
-          body: JSON.stringify({ contents: [{ role: "user", parts: [
-            { text: "Transkripsikan rakaman ini tepat dalam Bahasa Melayu Malaysia. Kekalkan nama dan nombor. Pulangkan teks transkripsi sahaja tanpa penerangan." },
-            { inlineData: { mimeType, data: audio } }
-          ] }], generationConfig: { temperature: 0.1, maxOutputTokens: 500 } })
-        });
-        const result = await upstream.json().catch(() => ({}));
-        if (!upstream.ok) return json({ error: "transcription_failed", message: result?.error?.message || "Pengecaman audio gagal." }, 502);
-        const transcript = result?.candidates?.[0]?.content?.parts?.map(p => typeof p.text === "string" ? p.text : "").join("").trim();
-        if (!transcript) return json({ error: "empty_transcript" }, 502);
-        return json({ ok: true, transcript });
-      } catch (_error) { return json({ error: "transcription_timeout" }, 504); }
+      const models = ["gemini-3.8-flash", "gemini-3.5-flash-lite"];
+      let lastError = "Pengecaman audio gagal.";
+      for (const model of models) {
+        try {
+          const upstream = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "x-goog-api-key": env.GEMINI_API_KEY },
+            signal: AbortSignal.timeout(12000),
+            body: JSON.stringify({ contents: [{ role: "user", parts: [
+              { text: "Transkripsikan rakaman ini tepat dalam Bahasa Melayu Malaysia. Kekalkan nama dan nombor. Pulangkan teks transkripsi sahaja tanpa penerangan." },
+              { inlineData: { mimeType, data: audio } }
+            ] }], generationConfig: { temperature: 0, maxOutputTokens: 500 } })
+          });
+          const result = await upstream.json().catch(() => ({}));
+          if (!upstream.ok) {
+            lastError = result?.error?.message || `Gemini HTTP ${upstream.status}`;
+            if (upstream.status === 429 || upstream.status === 500 || upstream.status === 502 || upstream.status === 503) continue;
+            return json({ error: "transcription_failed", status: upstream.status, message: lastError }, 502);
+          }
+          const transcript = result?.candidates?.[0]?.content?.parts
+            ?.map(p => typeof p.text === "string" ? p.text : "").join("").trim();
+          if (transcript) return json({ ok: true, transcript, model });
+          lastError = "Model menerima audio tetapi tidak memulangkan teks transkripsi.";
+        } catch (_error) {
+          lastError = "Sambungan ke servis pengecaman suara tamat masa.";
+        }
+      }
+      return json({ error: "transcription_failed", message: lastError }, 502);
     }
 
     if (url.pathname === "/v1/tts" && request.method === "POST") {
