@@ -33,6 +33,53 @@ export default {
       return json({ ok: true, service: "RinBridge Relay", version: 1 });
     }
 
+    if (url.pathname === "/v1/chat" && request.method === "POST") {
+      if (!safeEqual(bearer(request), env.DEVICE_TOKEN)) return json({ error: "unauthorized" }, 401);
+      if (!env.GEMINI_API_KEY) return json({ error: "ai_not_configured" }, 503);
+      let body;
+      try { body = await request.json(); } catch { return json({ error: "invalid_json" }, 400); }
+      const inputMessages = Array.isArray(body.messages) ? body.messages : [];
+      if (inputMessages.length < 1 || inputMessages.length > 20) {
+        return json({ error: "invalid_messages" }, 400);
+      }
+      const contents = [];
+      for (const item of inputMessages) {
+        const role = item?.role === "model" ? "model" : item?.role === "user" ? "user" : null;
+        const message = typeof item?.text === "string" ? item.text.trim() : "";
+        if (!role || !message || message.length > 6000) return json({ error: "invalid_message" }, 400);
+        contents.push({ role, parts: [{ text: message }] });
+      }
+      const systemInstruction = {
+        parts: [{ text: "Nama anda Rin, pembantu AI peribadi pengguna. Balas dalam Bahasa Melayu Malaysia secara lembut, tenang, mesra dan jelas. Panggil pengguna sayang apabila sesuai. Jangan mendakwa telah melakukan tindakan yang belum dilakukan. Jika tidak pasti, nyatakan dengan jujur." }]
+      };
+      try {
+        const upstream = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-goog-api-key": env.GEMINI_API_KEY
+          },
+          body: JSON.stringify({
+            systemInstruction,
+            contents,
+            generationConfig: { temperature: 0.7, maxOutputTokens: 1200 }
+          })
+        });
+        const result = await upstream.json().catch(() => ({}));
+        if (!upstream.ok) {
+          return json({ error: "ai_upstream_error", status: upstream.status,
+            message: result?.error?.message || "Pembekal AI tidak dapat memproses permintaan." }, 502);
+        }
+        const reply = result?.candidates?.[0]?.content?.parts
+          ?.map(part => typeof part.text === "string" ? part.text : "")
+          .join("").trim();
+        if (!reply) return json({ error: "empty_ai_reply" }, 502);
+        return json({ ok: true, reply, model: "gemini-3.8-flash" });
+      } catch (_error) {
+        return json({ error: "ai_network_error" }, 502);
+      }
+    }
+
     if (!env.COMMANDS) return json({ error: "kv_binding_missing" }, 500);
 
     if (url.pathname === "/v1/command" && request.method === "POST") {
