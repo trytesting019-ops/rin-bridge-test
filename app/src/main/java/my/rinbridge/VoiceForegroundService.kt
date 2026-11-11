@@ -397,7 +397,8 @@ class VoiceForegroundService : Service(), RecognitionListener {
     }
 
     private fun scheduleRestart() {
-        if (!listening) return
+        // Keep the microphone paused until Gemini has replied and Sulafat has finished speaking.
+        if (!listening || wakeDetected) return
 
         handler.removeCallbacks(restartRunnable)
         handler.postDelayed(
