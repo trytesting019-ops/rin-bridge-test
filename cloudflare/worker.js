@@ -66,19 +66,37 @@ export default {
       const text = typeof body.text === "string" ? body.text.trim() : "";
       if (!text || text.length > 3000) return json({ error: "invalid_text" }, 400);
       try {
-        const upstream = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash-tts:generateContent", {
-          method: "POST", headers: { "Content-Type": "application/json", "x-goog-api-key": env.GEMINI_API_KEY },
-          signal: AbortSignal.timeout(35000),
+        // Gemini 3.8 TTS uses the Interactions API. Request raw 24 kHz PCM
+        // because Android AudioTrack consumes headerless PCM16 directly.
+        const upstream = await fetch("https://generativelanguage.googleapis.com/v1beta/interactions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-goog-api-key": env.GEMINI_API_KEY },
+          signal: AbortSignal.timeout(45000),
           body: JSON.stringify({
-            contents: [{ role: "user", parts: [{ text: "Read the following exactly in a clearly feminine, warm, soft female voice with a natural adult woman tone. Speak naturally in Standard Malay with a Malaysian accent, slightly affectionate and emotionally kind. Use a relaxed pace, clear pronunciation, and avoid a low, husky, or masculine-sounding delivery. Do not read these instructions aloud.\n\n" + text }] }],
-            generationConfig: { responseModalities: ["AUDIO"], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: "Sulafat" } } } }
+            model: "gemini-3.8-flash-tts",
+            input: [{
+              type: "user_input",
+              content: [{
+                type: "text",
+                text,
+                annotations: [{
+                  type: "speech_metadata",
+                  style: "warm, gentle, feminine adult female voice; calm, soft, natural Malaysian Malay pronunciation; clear and relaxed conversational pace"
+                }]
+              }]
+            }],
+            response_format: { type: "audio", mime_type: "audio/l16", sample_rate: 24000 },
+            generation_config: { speech_config: [{ voice: "Sulafat" }] }
           })
         });
         const result = await upstream.json().catch(() => ({}));
         if (!upstream.ok) return json({ error: "tts_failed", message: result?.error?.message || "Penjanaan suara gagal." }, 502);
-        const audioPart = result?.candidates?.[0]?.content?.parts?.find(p => p.inlineData?.data);
-        if (!audioPart) return json({ error: "empty_audio" }, 502);
-        return json({ ok: true, audio: audioPart.inlineData.data, mimeType: audioPart.inlineData.mimeType || "audio/wav" });
+        const audioBlock = (result?.steps || [])
+          .filter(step => step.type === "model_output")
+          .flatMap(step => Array.isArray(step.content) ? step.content : [])
+          .find(item => item.type === "audio" && typeof item.data === "string" && item.data.length > 0);
+        if (!audioBlock) return json({ error: "empty_audio", message: "Gemini tidak memulangkan audio." }, 502);
+        return json({ ok: true, audio: audioBlock.data, mimeType: "audio/l16;rate=24000;channels=1" });
       } catch (_error) { return json({ error: "tts_timeout" }, 504); }
     }
 
