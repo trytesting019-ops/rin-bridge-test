@@ -216,9 +216,18 @@ class VoiceForegroundService : Service(), RecognitionListener {
         val command = CommandRouter.parse(text)
 
         if (command != RinCommand.UNKNOWN) {
-            MusicController.execute(this, command) { response ->
+            val musicCommands = setOf(
+                RinCommand.PLAY, RinCommand.PAUSE, RinCommand.STOP,
+                RinCommand.NEXT, RinCommand.PREVIOUS, RinCommand.OPEN_MUSICOLET
+            )
+            val callback: (String) -> Unit = { response ->
                 updateStatus(response)
                 wakeDetected = false
+            }
+            if (command in musicCommands) {
+                MusicController.execute(this, command, callback)
+            } else {
+                DeviceActionController.execute(this, command, callback)
             }
             return
         }
