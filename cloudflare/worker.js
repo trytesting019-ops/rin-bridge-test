@@ -70,8 +70,8 @@ export default {
           method: "POST", headers: { "Content-Type": "application/json", "x-goog-api-key": env.GEMINI_API_KEY },
           signal: AbortSignal.timeout(35000),
           body: JSON.stringify({
-            contents: [{ role: "user", parts: [{ text: "Read the following exactly in a gentle, warm, calm female voice. Speak naturally in Standard Malay with a Malaysian accent, slightly affectionate and emotionally kind. Use a relaxed pace and clear pronunciation. Do not read these instructions aloud.\n\n" + text }] }],
-            generationConfig: { responseModalities: ["AUDIO"], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: "Vindemiatrix" } } } }
+            contents: [{ role: "user", parts: [{ text: "Read the following exactly in a clearly feminine, warm, soft female voice with a natural adult woman tone. Speak naturally in Standard Malay with a Malaysian accent, slightly affectionate and emotionally kind. Use a relaxed pace, clear pronunciation, and avoid a low, husky, or masculine-sounding delivery. Do not read these instructions aloud.\n\n" + text }] }],
+            generationConfig: { responseModalities: ["AUDIO"], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: "Sulafat" } } } }
           })
         });
         const result = await upstream.json().catch(() => ({}));
