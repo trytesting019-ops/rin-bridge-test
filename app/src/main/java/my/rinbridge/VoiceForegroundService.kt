@@ -18,6 +18,11 @@ import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.util.Log
 import java.util.Locale
+import java.net.HttpURLConnection
+import java.net.URL
+import java.util.concurrent.Executors
+import org.json.JSONArray
+import org.json.JSONObject
 
 class VoiceForegroundService : Service(), RecognitionListener {
 
@@ -27,6 +32,8 @@ class VoiceForegroundService : Service(), RecognitionListener {
     private var listening = false
     private var recognizerActive = false
     private var wakeDetected = false
+    private val chatExecutor = Executors.newSingleThreadExecutor()
+    private val chatHistory = mutableListOf<Pair<String, String>>()
 
     private val restartRunnable = Runnable {
         if (listening && !recognizerActive) {
@@ -204,15 +211,81 @@ class VoiceForegroundService : Service(), RecognitionListener {
     private fun processCommand(text: String) {
         val command = CommandRouter.parse(text)
 
-        if (command == RinCommand.UNKNOWN) {
-            updateStatus("ARAHAN TIDAK DIKENALI: $text")
-            wakeDetected = false
+        if (command != RinCommand.UNKNOWN) {
+            MusicController.execute(this, command) { response ->
+                updateStatus(response)
+                wakeDetected = false
+            }
             return
         }
 
-        MusicController.execute(this, command) { response ->
-            updateStatus(response)
-            wakeDetected = false
+        // Arahan biasa dihantar kepada Gemini melalui endpoint /v1/chat.
+        updateStatus("RIN SEDANG MEMPROSES: $text")
+        chatExecutor.execute {
+            try {
+                val prefs = getSharedPreferences("rinbridge_relay", MODE_PRIVATE)
+                val baseUrl = prefs.getString("relay_url", "")?.trim()?.trimEnd('/') ?: ""
+                val token = prefs.getString("device_token", "")?.trim() ?: ""
+
+                if (!baseUrl.startsWith("https://") || token.length < 24) {
+                    updateStatus("SAMBUNGAN AI BELUM DISEDIAKAN: masukkan URL relay dan Device Token")
+                    wakeDetected = false
+                    return@execute
+                }
+
+                val messages = JSONArray()
+                synchronized(chatHistory) {
+                    chatHistory.forEach { item ->
+                        messages.put(JSONObject().put("role", item.first).put("text", item.second))
+                    }
+                    messages.put(JSONObject().put("role", "user").put("text", text))
+                }
+
+                val connection = (URL("$baseUrl/v1/chat").openConnection() as HttpURLConnection)
+                try {
+                    connection.requestMethod = "POST"
+                    connection.connectTimeout = 10000
+                    connection.readTimeout = 30000
+                    connection.doOutput = true
+                    connection.setRequestProperty("Authorization", "Bearer $token")
+                    connection.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                    connection.setRequestProperty("Accept", "application/json")
+
+                    val payload = JSONObject().put("messages", messages).toString()
+                    connection.outputStream.use { it.write(payload.toByteArray(Charsets.UTF_8)) }
+
+                    val code = connection.responseCode
+                    val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+                    val body = stream?.bufferedReader()?.use { it.readText() } ?: "{}"
+                    val result = JSONObject(body)
+
+                    if (code !in 200..299) {
+                        val detail = result.optString("message", result.optString("error", "HTTP $code"))
+                        updateStatus("AI GAGAL ($code): $detail")
+                        return@execute
+                    }
+
+                    val reply = result.optString("reply").trim()
+                    if (reply.isBlank()) {
+                        updateStatus("AI MEMULANGKAN JAWAPAN KOSONG")
+                        return@execute
+                    }
+
+                    synchronized(chatHistory) {
+                        chatHistory.add("user" to text)
+                        chatHistory.add("model" to reply)
+                        while (chatHistory.size > 12) chatHistory.removeAt(0)
+                    }
+                    updateStatus("RIN: $reply")
+                } finally {
+                    connection.disconnect()
+                }
+            } catch (error: Exception) {
+                Log.e(TAG, "Chat request failed", error)
+                updateStatus("GAGAL HUBUNGI AI: ${error.message ?: "ralat rangkaian"}")
+            } finally {
+                wakeDetected = false
+            }
         }
     }
 
