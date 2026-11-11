@@ -2,6 +2,10 @@
 package my.rinbridge
 
 import android.Manifest
+import android.media.AudioAttributes
+import android.media.AudioFormat
+import android.media.AudioTrack
+import android.util.Base64
 import android.app.Service
 import android.app.Notification
 import android.app.NotificationChannel
@@ -277,6 +281,7 @@ class VoiceForegroundService : Service(), RecognitionListener {
                         while (chatHistory.size > 12) chatHistory.removeAt(0)
                     }
                     updateStatus("RIN: $reply")
+                    speakWithSulafat(reply, baseUrl, token)
                 } finally {
                     connection.disconnect()
                 }
@@ -289,6 +294,57 @@ class VoiceForegroundService : Service(), RecognitionListener {
         }
     }
 
+    private fun speakWithSulafat(text: String, baseUrl: String, token: String) {
+        try {
+            updateStatus("RIN SEDANG MENYEDIAKAN SUARA SULAFAT")
+            val connection = URL(baseUrl + "/v1/tts").openConnection() as HttpURLConnection
+            val audioBytes: ByteArray
+            val mimeType: String
+            try {
+                connection.requestMethod = "POST"
+                connection.connectTimeout = 10000
+                connection.readTimeout = 45000
+                connection.doOutput = true
+                connection.setRequestProperty("Authorization", "Bearer " + token)
+                connection.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                connection.setRequestProperty("Accept", "application/json")
+                val payload = JSONObject().put("text", text).toString()
+                connection.outputStream.use { it.write(payload.toByteArray(Charsets.UTF_8)) }
+                val code = connection.responseCode
+                val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+                val body = stream?.bufferedReader()?.use { it.readText() } ?: "{}"
+                val result = JSONObject(body)
+                if (code !in 200..299) {
+                    updateStatus("SULAFAT GAGAL (" + code + "): " + result.optString("message", result.optString("error", "ralat TTS")))
+                    return
+                }
+                val encoded = result.optString("audio")
+                if (encoded.isBlank()) { updateStatus("SULAFAT MEMULANGKAN AUDIO KOSONG"); return }
+                audioBytes = Base64.decode(encoded, Base64.DEFAULT)
+                mimeType = result.optString("mimeType", "audio/L16;rate=24000")
+            } finally { connection.disconnect() }
+            val rateMatch = Regex("rate=(\\d+)", RegexOption.IGNORE_CASE).find(mimeType)
+            val sampleRate = rateMatch?.groupValues?.get(1)?.toIntOrNull() ?: 24000
+            val minBuffer = AudioTrack.getMinBufferSize(sampleRate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
+            if (minBuffer <= 0 || audioBytes.isEmpty()) { updateStatus("FORMAT AUDIO SULAFAT TIDAK DISOKONG"); return }
+            val track = AudioTrack.Builder()
+                .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
+                .setAudioFormat(AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT).setSampleRate(sampleRate).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build())
+                .setBufferSizeInBytes(maxOf(minBuffer, audioBytes.size))
+                .setTransferMode(AudioTrack.MODE_STATIC)
+                .build()
+            try {
+                updateStatus("RIN SEDANG BERCAKAP - SULAFAT")
+                track.write(audioBytes, 0, audioBytes.size)
+                track.play()
+                while (track.playState == AudioTrack.PLAYSTATE_PLAYING && track.playbackHeadPosition < audioBytes.size / 2) { Thread.sleep(40) }
+            } finally { track.stop(); track.release() }
+            updateStatus("RIN SELESAI BERCAKAP")
+        } catch (error: Exception) {
+            Log.e(TAG, "Sulafat TTS failed", error)
+            updateStatus("RALAT SUARA SULAFAT: " + (error.message ?: "ralat audio"))
+        }
+    }
     override fun onError(error: Int) {
         recognizerActive = false
 
