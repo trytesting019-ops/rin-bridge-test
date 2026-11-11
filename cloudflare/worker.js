@@ -52,32 +52,43 @@ export default {
       const systemInstruction = {
         parts: [{ text: "Nama anda Rin, pembantu AI peribadi pengguna. Balas dalam Bahasa Melayu Malaysia secara lembut, tenang, mesra dan jelas. Panggil pengguna sayang apabila sesuai. Jangan mendakwa telah melakukan tindakan yang belum dilakukan. Jika tidak pasti, nyatakan dengan jujur." }]
       };
-      try {
-        const upstream = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-goog-api-key": env.GEMINI_API_KEY
-          },
-          body: JSON.stringify({
-            systemInstruction,
-            contents,
-            generationConfig: { temperature: 0.7, maxOutputTokens: 1200 }
-          })
-        });
-        const result = await upstream.json().catch(() => ({}));
-        if (!upstream.ok) {
-          return json({ error: "ai_upstream_error", status: upstream.status,
-            message: result?.error?.message || "Pembekal AI tidak dapat memproses permintaan." }, 502);
+      const models = ["gemini-3.8-flash", "gemini-3.5-flash-lite"];
+      let lastStatus = 502;
+      let lastMessage = "Pembekal AI tidak dapat memproses permintaan.";
+      for (const model of models) {
+        try {
+          const upstream = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-goog-api-key": env.GEMINI_API_KEY
+            },
+            body: JSON.stringify({
+              systemInstruction,
+              contents,
+              generationConfig: { temperature: 0.7, maxOutputTokens: 1200 }
+            })
+          });
+          const result = await upstream.json().catch(() => ({}));
+          if (!upstream.ok) {
+            lastStatus = upstream.status;
+            lastMessage = result?.error?.message || "Pembekal AI tidak dapat memproses permintaan.";
+            // Only switch model for temporary capacity/rate-limit failures.
+            if (upstream.status === 429 || upstream.status === 503 || upstream.status === 502) continue;
+            return json({ error: "ai_upstream_error", status: upstream.status, message: lastMessage }, 502);
+          }
+          const reply = result?.candidates?.[0]?.content?.parts
+            ?.map(part => typeof part.text === "string" ? part.text : "")
+            .join("").trim();
+          if (!reply) return json({ error: "empty_ai_reply", model }, 502);
+          return json({ ok: true, reply, model });
+        } catch (_error) {
+          lastStatus = 502;
+          lastMessage = "Rangkaian ke pembekal AI terganggu.";
         }
-        const reply = result?.candidates?.[0]?.content?.parts
-          ?.map(part => typeof part.text === "string" ? part.text : "")
-          .join("").trim();
-        if (!reply) return json({ error: "empty_ai_reply" }, 502);
-        return json({ ok: true, reply, model: "gemini-3.8-flash" });
-      } catch (_error) {
-        return json({ error: "ai_network_error" }, 502);
       }
+      return json({ error: "ai_upstream_error", status: lastStatus, message: lastMessage,
+        tried_models: models }, 503);
     }
 
     if (!env.COMMANDS) return json({ error: "kv_binding_missing" }, 500);
