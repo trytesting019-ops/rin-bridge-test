@@ -92,7 +92,7 @@ class VoiceForegroundService : Service(), RecognitionListener {
     }
 
     private fun startListening() {
-        if (!listening || recognizerActive || wakeDetected) return
+        if (!listening || recognizerActive) return
         try {
             val output = File(cacheDir, "rin_voice_\${System.currentTimeMillis()}.3gp")
             recordingFile = output
@@ -191,7 +191,11 @@ class VoiceForegroundService : Service(), RecognitionListener {
                     wakeDetected = true
                     val commandText = spoken.replace(wakeRegex, "").trim()
                     updateStatus("PANGGILAN RIN DIKESAN")
-                    if (commandText.isNotEmpty()) processCommand(commandText)
+                    if (commandText.isNotEmpty()) {
+                        processCommand(commandText)
+                    } else {
+                        handler.postDelayed({ if (listening) startListening() }, RESTART_DELAY)
+                    }
                 } else if (wakeDetected) {
                     processCommand(spoken)
                 } else {
