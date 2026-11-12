@@ -5,6 +5,8 @@ import android.Manifest
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
+import android.media.MediaRecorder
+import java.io.File
 import android.util.Base64
 import android.app.Service
 import android.app.Notification
@@ -31,6 +33,8 @@ import org.json.JSONObject
 class VoiceForegroundService : Service(), RecognitionListener {
 
     private var speechRecognizer: SpeechRecognizer? = null
+    private var mediaRecorder: MediaRecorder? = null
+    private var recordingFile: File? = null
     private val handler = Handler(Looper.getMainLooper())
 
     private var listening = false
@@ -79,19 +83,6 @@ class VoiceForegroundService : Service(), RecognitionListener {
             return START_NOT_STICKY
         }
 
-        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
-            updateStatus("Speech Recognition tidak tersedia")
-            stopSelf()
-            return START_NOT_STICKY
-        }
-
-        if (speechRecognizer == null) {
-            speechRecognizer =
-                SpeechRecognizer.createSpeechRecognizer(this)
-
-            speechRecognizer?.setRecognitionListener(this)
-        }
-
         if (!listening) {
             listening = true
             startListening()
@@ -101,48 +92,121 @@ class VoiceForegroundService : Service(), RecognitionListener {
     }
 
     private fun startListening() {
-        if (!listening || recognizerActive) return
-
-        val recognizer = speechRecognizer ?: return
-
-        val speechIntent =
-            Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-
-                putExtra(
-                    RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-                    RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
-                )
-
-                // Biarkan Android menggunakan bahasa lalai.
-                // Jangan paksa en-US atau ms-MY dahulu.
-
-                putExtra(
-                    RecognizerIntent.EXTRA_PARTIAL_RESULTS,
-                    true
-                )
-
-                putExtra(
-                    RecognizerIntent.EXTRA_MAX_RESULTS,
-                    3
-                )
-            }
-
+        if (!listening || recognizerActive || wakeDetected) return
         try {
-            updateStatus("MENYAMBUNG MIKROFON...")
+            val output = File(cacheDir, "rin_voice_\${System.currentTimeMillis()}.3gp")
+            recordingFile = output
+            val recorder = MediaRecorder()
+            mediaRecorder = recorder
+            recorder.setAudioSource(MediaRecorder.AudioSource.MIC)
+            recorder.setOutputFormat(MediaRecorder.OutputFormat.THREE_GPP)
+            recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AMR_NB)
+            recorder.setAudioSamplingRate(8000)
+            recorder.setAudioEncodingBitRate(12200)
+            recorder.setMaxDuration(5500)
+            recorder.setOutputFile(output.absolutePath)
+            recorder.setOnInfoListener { current, what, _ ->
+                if (what == MediaRecorder.MEDIA_RECORDER_INFO_MAX_DURATION_REACHED) finishRecording(current)
+            }
+            recorder.setOnErrorListener { current, what, extra ->
+                Log.e(TAG, "MediaRecorder error: $what/$extra")
+                finishRecording(current)
+                updateStatus("RALAT RAKAMAN MIKROFON")
+                scheduleRestart()
+            }
+            updateStatus("MIKROFON AKTIF - SEBUT HEY RIN")
             recognizerActive = true
-            recognizer.startListening(speechIntent)
-
+            recorder.prepare()
+            recorder.start()
         } catch (e: Exception) {
             recognizerActive = false
-
-            Log.e(TAG, "Start listening failed", e)
-
-            updateStatus("GAGAL MULA: ${e.message}")
-
+            releaseRecorder()
+            Log.e(TAG, "Audio recording failed", e)
+            updateStatus("GAGAL MULA RAKAMAN: \${e.message}")
             scheduleRestart()
         }
     }
 
+    private fun finishRecording(current: MediaRecorder) {
+        if (!recognizerActive) return
+        recognizerActive = false
+        try { current.stop() } catch (e: Exception) { Log.w(TAG, "Short recording discarded", e) }
+        try { current.reset(); current.release() } catch (_: Exception) {}
+        if (mediaRecorder === current) mediaRecorder = null
+        val file = recordingFile
+        recordingFile = null
+        if (file == null || !file.exists() || file.length() < 500) {
+            file?.delete()
+            scheduleRestart()
+            return
+        }
+        chatExecutor.execute { try { transcribeAudio(file) } finally { file.delete() } }
+    }
+
+    private fun releaseRecorder() {
+        try { mediaRecorder?.reset(); mediaRecorder?.release() } catch (_: Exception) {}
+        mediaRecorder = null
+        recordingFile?.delete()
+        recordingFile = null
+    }
+
+    private fun transcribeAudio(file: File) {
+        try {
+            val prefs = getSharedPreferences("rinbridge_relay", MODE_PRIVATE)
+            val baseUrl = prefs.getString("relay_url", "")?.trim()?.trimEnd('/') ?: ""
+            val token = prefs.getString("device_token", "")?.trim() ?: ""
+            if (!baseUrl.startsWith("https://") || token.length < 24) {
+                updateStatus("RELAY BELUM DISEDIAKAN UNTUK PENGECAMAN SUARA")
+                return
+            }
+            updateStatus("RIN SEDANG MENGENALI SUARA...")
+            val audio = Base64.encodeToString(file.readBytes(), Base64.NO_WRAP)
+            val connection = URL("$baseUrl/v1/transcribe").openConnection() as HttpURLConnection
+            try {
+                connection.requestMethod = "POST"
+                connection.connectTimeout = 10000
+                connection.readTimeout = 25000
+                connection.doOutput = true
+                connection.setRequestProperty("Authorization", "Bearer $token")
+                connection.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                connection.setRequestProperty("Accept", "application/json")
+                val payload = JSONObject().put("audio", audio).put("mimeType", "audio/3gpp").toString()
+                connection.outputStream.use { it.write(payload.toByteArray(Charsets.UTF_8)) }
+                val code = connection.responseCode
+                val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+                val body = stream?.bufferedReader()?.use { it.readText() } ?: "{}"
+                val result = JSONObject(body)
+                if (code !in 200..299) {
+                    updateStatus("PENGECAMAN GAGAL ($code): " + result.optString("message", result.optString("error", "ralat relay")))
+                    return
+                }
+                val spoken = result.optString("transcript").trim().lowercase(Locale.ROOT)
+                if (spoken.isBlank()) {
+                    updateStatus("SUARA TIDAK DIKENALI")
+                    return
+                }
+                Log.d(TAG, "Transcribed: $spoken")
+                val wakeRegex = Regex("\\b(hey|hei|hai)\\s+rin\\b")
+                if (wakeRegex.containsMatchIn(spoken)) {
+                    wakeDetected = true
+                    val commandText = spoken.replace(wakeRegex, "").trim()
+                    updateStatus("PANGGILAN RIN DIKESAN")
+                    if (commandText.isNotEmpty()) processCommand(commandText)
+                } else if (wakeDetected) {
+                    processCommand(spoken)
+                } else {
+                    updateStatus("SUARA DITERIMA - MENUNGGU HEY RIN")
+                }
+            } finally {
+                connection.disconnect()
+            }
+        } catch (error: Exception) {
+            Log.e(TAG, "Audio transcription failed", error)
+            updateStatus("RALAT PENGECAMAN SUARA: \${error.message ?: "sambungan gagal"}")
+        } finally {
+            scheduleRestart()
+        }
+    }
     override fun onReadyForSpeech(params: Bundle?) {
         updateStatus("MIKROFON SIAP - CAKAP SEKARANG")
     }
@@ -496,6 +560,7 @@ class VoiceForegroundService : Service(), RecognitionListener {
 
         handler.removeCallbacksAndMessages(null)
 
+        releaseRecorder()
         speechRecognizer?.destroy()
         speechRecognizer = null
 
